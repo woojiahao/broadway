@@ -35,9 +35,11 @@ defmodule Broadway.Topology do
 
   @impl true
   def init({module, opts}) do
+    # http://erlang.org/doc/man/erlang.html#process_flag-2
     Process.flag(:trap_exit, true)
 
     unless Code.ensure_loaded?(:persistent_term) do
+      # https://hexdocs.pm/elixir/Code.html#ensure_loaded/1
       require Logger
       Logger.error("Broadway requires Erlang/OTP 21.3+")
       raise "Broadway requires Erlang/OTP 21.3+"
@@ -45,8 +47,10 @@ defmodule Broadway.Topology do
 
     # We want to invoke this as early as possible otherwise the
     # stacktrace gets deeper and deeper in case of errors.
+    # Prepare the producer used
     {child_specs, opts} = prepare_for_start(module, opts)
 
+    # Flatten config from options
     config = init_config(module, opts)
     {:ok, supervisor_pid} = start_supervisor(child_specs, config, opts)
 
@@ -93,8 +97,11 @@ defmodule Broadway.Topology do
   defp reason_to_signal(other), do: other
 
   defp prepare_for_start(module, opts) do
+    # Loads the Producer module for the specific message broker used
     {producer_mod, _producer_opts} = opts[:producer][:module]
 
+    # If the producer has its own implementation of prepare_for_start and it returns the child_specs and options,
+    # we can validate the options provided using NimbleOptions
     if Code.ensure_loaded?(producer_mod) and
          function_exported?(producer_mod, :prepare_for_start, 2) do
       case producer_mod.prepare_for_start(module, opts) do
@@ -171,7 +178,9 @@ defmodule Broadway.Topology do
     {RateLimiter, opts}
   end
 
+  # Creates the child specs for all producers
   defp build_producers_specs(config, opts) do
+    # Extract properties from config
     %{
       name: broadway_name,
       producer_config: producer_config,
@@ -183,6 +192,8 @@ defmodule Broadway.Topology do
     [{_, processor_config} | _other_processors] = processors_config
 
     # The partition of the producer depends on the processor, so we handle it here.
+    # Partitioning determines which processors handle what. So if a message contains the same user_id, it will be
+    # handled by the same (batch) processor
     dispatcher =
       case processor_config[:partition_by] do
         nil ->
@@ -190,17 +201,21 @@ defmodule Broadway.Topology do
 
         func ->
           n_processors = processor_config[:concurrency]
+
+          # Hash computed by applying the partition function and dividing the result by the number of processes
           hash_func = fn msg -> {msg, rem(func.(msg), n_processors)} end
           {GenStage.PartitionDispatcher, partitions: 0..(n_processors - 1), hash: hash_func}
       end
 
     args = [broadway: opts, dispatcher: dispatcher] ++ producer_config
 
+    # Returns the processes that corresponds to the number of producers required with start options
     names_and_specs =
       for index <- 0..(n_producers - 1) do
         name = process_name(broadway_name, "Producer", index)
         start_options = start_options(name, producer_config)
 
+        # Every producer uses the ProducerStage module
         spec = %{
           start: {ProducerStage, :start_link, [args, index, start_options]},
           id: name,

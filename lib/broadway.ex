@@ -781,10 +781,17 @@ defmodule Broadway do
   end
 
   defp carry_over_one(opts, key, keys) do
+    # Update the value at opts[key]
+    # Takes the value at opts[key] and merges it with the list of values from the options that match a given key
+    # Merges values of :hibernate_after and :spawn_opt properties from other parts of the options into the :producer
+    # property. If property is already set in the :producer property, it overwrites the values given for
+    # :hibernate_after or :spawn_opt
+    # In a sense, the keys act as default values if the primary key doesn't contain/set the following values
     update_in(opts[key], fn value -> Keyword.merge(Keyword.take(opts, keys), value) end)
   end
 
   defp carry_over_many(opts, key, keys) do
+    # Same thing but uses default values for keyword lists whose values are keyword lists, i.e. [a: [b: [partition_by:]]]
     update_in(opts[key], fn list ->
       defaults = Keyword.take(opts, keys)
       for {k, v} <- list, do: {k, Keyword.merge(defaults, v)}
